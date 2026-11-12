@@ -1,0 +1,40 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# 环境变量与密钥（CloudBase API Key、SMTP 密码等不要提交）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+cloudbaserc.json
+.cloudbase/
+
+# 账号、密码、测试凭据
+*creds*
+*secret*
+*password*
+doctor-*.txt
+.qa/
+
+# 真实患者数据导出（示例数据 db/demo.sql 是虚构的，可以提交）
+*.csv
+*.xlsx
+db/export*/
+db/backup*/
+
+# 本地工具配置
+.claude/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# 日志与系统文件
+logs/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
