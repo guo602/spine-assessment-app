@@ -6,12 +6,20 @@ export type Role = 'doctor' | 'patient';
 export interface Me {
   uid: string;
   isDoctor: boolean;
-  email: string | null;
+  phone: string | null;
 }
 
 const fail = (action: string, error: any) => {
   const msg = error?.message || error?.msg || (typeof error === 'string' ? error : JSON.stringify(error));
   return new Error(`${action}失败：${msg}`);
+};
+
+// 手机号归一化：去非数字、去 0086/+86 前缀、取最后 11 位（与数据库 norm_phone 一致）
+const normalizePhone = (p: any) => {
+  let d = String(p || '').replace(/\D/g, '');
+  if (d.startsWith('0086')) d = d.slice(4);
+  else if (d.startsWith('86') && d.length === 13) d = d.slice(2);
+  return d.slice(-11);
 };
 
 const toPatient = (row: any, records: any[] = []) => ({
@@ -25,6 +33,7 @@ const toPatient = (row: any, records: any[] = []) => ({
   email: row.email || '',
   diagnosis: row.diagnosis || '',
   surgery: row.surgery || '',
+  surgeon: row.surgeon || '',
   surgeryDate: row.surgery_date || '',
   isDemo: !!row.is_demo,
   selfRegistered: !!row.self_registered,
@@ -37,7 +46,7 @@ export async function getMe(): Promise<Me> {
   const { data, error } = await db().from('me').select('*');
   if (error) throw fail('读取账号信息', error);
   const row = data?.[0] || {};
-  return { uid: row.uid, isDoctor: row.is_doctor === true, email: row.email || null };
+  return { uid: row.uid, isDoctor: row.is_doctor === true, phone: row.phone || null };
 }
 
 // 医生拿到全部患者，患者只拿到自己（由 RLS 过滤）
@@ -65,25 +74,26 @@ export async function createPatient(p: any) {
       age: Number(p.age) || null,
       spine_region: p.spineRegion || 'lumbar',
       hospital_id: p.hospitalId || null,
-      phone: p.phone || null,
+      phone: normalizePhone(p.phone) || null,
       email: p.email ? p.email.trim().toLowerCase() : null,
       diagnosis: p.diagnosis || null,
       surgery: p.surgery || null,
+      surgeon: p.surgeon || null,
       surgery_date: p.surgeryDate || null
     })
     .select('*');
   if (error) {
-    if (String(error.message || '').includes('patients_email_key')) {
-      throw new Error('建档失败：该邮箱已绑定其他患者档案');
+    if (String(error.message || '').includes('patients_phone_key')) {
+      throw new Error('建档失败：该手机号已绑定其他患者档案');
     }
     throw fail('建档', error);
   }
   return toPatient(data[0]);
 }
 
-// 患者首次登录、还没有档案时自己建档：邮箱必须是自己登录用的已验证邮箱（数据库策略会再校验一次）
+// 患者首次登录、还没有档案时自己建档：手机号必须是自己的登录手机号（数据库策略会再校验一次）
 export async function registerSelf(p: any, me: Me) {
-  if (!me.email) throw new Error('建档失败：没有取到您已验证的登录邮箱，请退出后重新用邮箱验证码登录');
+  if (!me.phone) throw new Error('建档失败：没有取到您的登录手机号，请退出后重新用手机验证码登录');
   const { data, error } = await db()
     .from('patients')
     .insert({
@@ -91,16 +101,16 @@ export async function registerSelf(p: any, me: Me) {
       gender: p.gender || null,
       age: Number(p.age) || null,
       spine_region: p.spineRegion || 'lumbar',
-      phone: p.phone || null,
-      email: me.email,
+      phone: me.phone,
+      email: p.email || null,
       diagnosis: p.diagnosis || null,
       self_registered: true,
       created_by: me.uid
     })
     .select('*');
   if (error) {
-    if (String(error.message || '').includes('patients_email_key')) {
-      throw new Error('建档失败：该邮箱已有档案，请刷新页面');
+    if (String(error.message || '').includes('patients_phone_key')) {
+      throw new Error('建档失败：该手机号已有档案，请刷新页面');
     }
     throw fail('建档', error);
   }

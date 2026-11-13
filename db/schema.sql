@@ -2,9 +2,9 @@
 -- 执行：tcb db execute --sql "$(cat db/schema.sql)"
 -- 角色：
 --   医生 = public.doctors 里有自己 uid 的登录用户：可读写全部患者与随访记录（团队共享）
---   患者 = 邮箱验证码登录的用户：只能读邮箱与自己一致的档案和记录，只能新增自己的记录；
---          还没有档案时可以用自己的邮箱自助建一份（self_registered = true）
---   其他人（匿名、未建档邮箱）：看不到任何数据
+--   患者 = 手机号验证码登录的用户：只能读写手机号与自己一致的档案和记录，只能新增自己的记录；
+--          还没有档案时可以用自己的手机号自助建一份（self_registered = true）
+--   其他人（匿名、未建档手机号）：看不到任何数据
 
 -- ---------- 表 ----------
 CREATE TABLE IF NOT EXISTS public.doctors (
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS public.patients (
   email        text,
   diagnosis    text,
   surgery      text,
+  surgeon      text,
   surgery_date text,
   is_demo      boolean NOT NULL DEFAULT false,
   -- 患者首次登录时自己建的档（医生端会标出来，便于甄别陌生人提交）
@@ -33,11 +34,10 @@ CREATE TABLE IF NOT EXISTS public.patients (
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
--- 一个邮箱只对应一个患者档案，否则患者登录后会匹配到多个人
-CREATE UNIQUE INDEX IF NOT EXISTS patients_email_key
-  ON public.patients (lower(email)) WHERE email IS NOT NULL AND email <> '';
+-- 邮箱仅作存档参考，不再作为登录身份，不强制唯一
 -- 已建好的库补上新列
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS self_registered boolean NOT NULL DEFAULT false;
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS surgeon text;
 
 -- data：页面里的随访记录对象（stage/date/各项评分/解读…）；answers：本次原始作答
 CREATE TABLE IF NOT EXISTS public.records (
@@ -57,15 +57,27 @@ CREATE OR REPLACE FUNCTION public.is_doctor() RETURNS boolean
   SELECT EXISTS (SELECT 1 FROM public.doctors WHERE uid = auth.uid())
 $$;
 
--- 从用户表取当前登录用户“已验证”的邮箱，不依赖登录令牌里是否带 email。
--- 邮箱验证码注册的用户 email_verified 为空，但 created_from = 'email' 说明邮箱已通过验证码验证；
--- 管理员在后台填写的邮箱（created_from = 'admin'）不算，避免冒用他人邮箱
-CREATE OR REPLACE FUNCTION public.my_email() RETURNS text
+-- 手机号归一化：去掉所有非数字，去掉常见的 0086 / +86 前缀，再取最后 11 位。
+-- '13800138000'、'+86 13800138000'、'8613800138000'、'008613800138000' 都得到同一结果
+CREATE OR REPLACE FUNCTION public.norm_phone(p text) RETURNS text
+  LANGUAGE sql IMMUTABLE AS $$
+  SELECT right(
+    regexp_replace(
+      regexp_replace(
+        regexp_replace(coalesce(p, ''), '[^0-9]', '', 'g'),
+        '^0086', ''
+      ),
+      '^86', ''
+    ),
+    11
+  )
+$$;
+
+-- 当前登录用户的手机号（手机号验证码登录的用户，其 phone_number 已由短信验证）
+CREATE OR REPLACE FUNCTION public.my_phone() RETURNS text
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
-  SELECT lower(u.email) FROM auth.users u
-  WHERE u.sub = auth.uid()
-    AND (coalesce(u.email_verified, false) OR u.created_from = 'email')
-    AND u.email IS NOT NULL AND u.email <> ''
+  SELECT public.norm_phone(u.phone_number) FROM auth.users u
+  WHERE u.sub = auth.uid() AND u.phone_number IS NOT NULL AND u.phone_number <> ''
   LIMIT 1
 $$;
 
@@ -73,15 +85,20 @@ $$;
 CREATE OR REPLACE FUNCTION public.my_patient_ids() RETURNS SETOF text
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, auth AS $$
   SELECT p.id FROM public.patients p
-  WHERE p.email IS NOT NULL AND p.email <> '' AND lower(p.email) = public.my_email()
+  WHERE p.phone IS NOT NULL AND p.phone <> '' AND public.norm_phone(p.phone) = public.my_phone()
 $$;
 
-REVOKE ALL ON FUNCTION public.is_doctor(), public.my_email(), public.my_patient_ids() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_doctor(), public.my_email(), public.my_patient_ids() TO authenticated;
+-- 一个手机号只对应一个患者档案，否则患者登录后会匹配到多个人（归一化后比较，+86/86/空格都等价）
+CREATE UNIQUE INDEX IF NOT EXISTS patients_phone_key
+  ON public.patients (public.norm_phone(phone)) WHERE phone IS NOT NULL AND phone <> '';
 
--- 前端用它判断角色：SELECT * FROM me
-CREATE OR REPLACE VIEW public.me AS
-  SELECT auth.uid() AS uid, public.is_doctor() AS is_doctor, public.my_email() AS email;
+REVOKE ALL ON FUNCTION public.is_doctor(), public.norm_phone(text), public.my_phone(), public.my_patient_ids() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_doctor(), public.norm_phone(text), public.my_phone(), public.my_patient_ids() TO authenticated;
+
+-- 前端用它判断角色与身份：SELECT * FROM me
+DROP VIEW IF EXISTS public.me;
+CREATE VIEW public.me AS
+  SELECT auth.uid() AS uid, public.is_doctor() AS is_doctor, public.my_phone() AS phone;
 
 -- ---------- 行级权限 ----------
 ALTER TABLE public.doctors  ENABLE ROW LEVEL SECURITY;
@@ -97,17 +114,17 @@ DROP POLICY IF EXISTS patients_select ON public.patients;
 DROP POLICY IF EXISTS patients_insert ON public.patients;
 DROP POLICY IF EXISTS patients_update ON public.patients;
 DROP POLICY IF EXISTS patients_delete ON public.patients;
--- 患者能看到的是邮箱与自己已验证邮箱一致的那一份档案。
--- 直接比较本行的 email（而不是查 my_patient_ids()），这样患者自助建档时 INSERT ... RETURNING 也能读回刚建的行
+-- 患者能看到的是手机号与自己一致的那一份档案。
+-- 直接比较本行的 phone（而不是查 my_patient_ids()），这样患者自助建档时 INSERT ... RETURNING 也能读回刚建的行
 CREATE POLICY patients_select ON public.patients FOR SELECT TO authenticated
-  USING (public.is_doctor() OR (email IS NOT NULL AND email <> '' AND lower(email) = public.my_email()));
--- 医生可以随意建档；患者只能用自己已验证的邮箱给自己建一份（每个邮箱唯一），且必须标记为自助建档
+  USING (public.is_doctor() OR (phone IS NOT NULL AND phone <> '' AND public.norm_phone(phone) = public.my_phone()));
+-- 医生可以随意建档；患者只能用自己已验证的手机号给自己建一份（每个手机号唯一），且必须标记为自助建档
 CREATE POLICY patients_insert ON public.patients FOR INSERT TO authenticated
   WITH CHECK (
     public.is_doctor()
     OR (
-      public.my_email() IS NOT NULL
-      AND lower(email) = public.my_email()
+      public.my_phone() IS NOT NULL
+      AND public.norm_phone(phone) = public.my_phone()
       AND self_registered
       AND NOT is_demo
       AND created_by = auth.uid()

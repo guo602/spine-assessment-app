@@ -1669,6 +1669,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
     email: '',
     diagnosis: '',
     surgery: '',
+    surgeon: '',
     surgeryDate: ''
   });
 
@@ -1710,7 +1711,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
   });
   const [qrModal, setQrModal] = useState({ open: false, dataUrl: '', patient: null });
   // 患者首次登录自助建档表单
-  const [selfRegForm, setSelfRegForm] = useState({ name: '', gender: '女', age: '', spineRegion: 'lumbar', phone: '', diagnosis: '' });
+  const [selfRegForm, setSelfRegForm] = useState({ name: '', gender: '女', age: '', spineRegion: 'lumbar', diagnosis: '' });
 
   // 隐私字段脱敏辅助函数（仅保留姓名、年龄、病案号，其余显示为 *）
   // 患者看自己的档案时不脱敏
@@ -1809,7 +1810,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
     }
   };
 
-  // 生成扫码登录二维码：扫码打开网站，患者用建档时登记的邮箱收验证码登录
+  // 生成扫码登录二维码：扫码打开网站，患者用建档时登记的手机号收验证码登录
   const openPatientQr = async (patient) => {
     const url = `${window.location.origin}/`;
     const dataUrl = await QRCode.toDataURL(url, { width: 480, margin: 2 });
@@ -1946,7 +1947,6 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
           gender: selfRegForm.gender,
           age: selfRegForm.age,
           spineRegion: selfRegForm.spineRegion,
-          phone: selfRegForm.phone.trim(),
           diagnosis: selfRegForm.diagnosis.trim()
         },
         me
@@ -1987,6 +1987,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
         email,
         diagnosis: newPatientForm.diagnosis.trim(),
         surgery: newPatientForm.surgery.trim(),
+        surgeon: newPatientForm.surgeon.trim(),
         surgeryDate: newPatientForm.surgeryDate
       });
       setPatients((prev) => [created, ...prev]);
@@ -1994,7 +1995,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
       setSpineRegion(created.spineRegion);
       setFollowUpStage('术前基线评估');
       setCaseTab('search');
-      setNewPatientForm((f) => ({ ...f, name: '', age: '', hospitalId: '', phone: '', email: '', diagnosis: '', surgery: '', surgeryDate: '' }));
+      setNewPatientForm((f) => ({ ...f, name: '', age: '', hospitalId: '', phone: '', email: '', diagnosis: '', surgery: '', surgeon: '', surgeryDate: '' }));
       flashToast(`已成功建档并选中患者：${created.name}`);
     } catch (err) {
       flashToast(err.message, 5000);
@@ -2240,7 +2241,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
             <button
               onClick={onSignOut}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-600 hover:bg-slate-100 transition border border-slate-200"
-              title={isDoctor ? '医生账号' : me.email || ''}
+              title={isDoctor ? '医生账号' : me.phone || ''}
             >
               <LogOut className="w-3.5 h-3.5" />
               退出{isDoctor ? '（医生）' : ''}
@@ -2328,9 +2329,9 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                     重新载入
                   </button>
                 </>
-              ) : !me.email ? (
+              ) : !me.phone ? (
                 <>
-                  <p className="font-bold text-slate-800">没有取到您已验证的登录邮箱</p>
+                  <p className="font-bold text-slate-800">没有取到您的登录手机号</p>
                   <p className="text-xs text-slate-500 leading-relaxed">
                     请退出后，在登录页用邮箱接收验证码重新登录。
                   </p>
@@ -2342,7 +2343,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                 <form onSubmit={handleSelfRegister} className="space-y-3 text-left">
                   <div className="text-center">
                     <p className="font-bold text-slate-800">首次使用，请先建立您的随访档案</p>
-                    <p className="text-xs text-slate-500 mt-1">登录邮箱：{me.email}。档案建好后即可开始填写问卷，以后用这个邮箱登录就能看到历次结果。</p>
+                    <p className="text-xs text-slate-500 mt-1">登录手机号：{me.phone}。档案建好后即可开始填写问卷，以后用这个手机号登录就能看到历次结果。</p>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">姓名 *</label>
@@ -2400,16 +2401,6 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">联系电话（选填）</label>
-                    <input
-                      type="tel"
-                      inputMode="tel"
-                      value={selfRegForm.phone}
-                      onChange={(e) => setSelfRegForm({ ...selfRegForm, phone: e.target.value })}
-                      className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">医生告诉您的诊断（选填）</label>
                     <input
                       value={selfRegForm.diagnosis}
@@ -2420,7 +2411,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                   </div>
                   <div className="flex items-center justify-between gap-2 pt-1">
                     <button type="button" onClick={onSignOut} className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200">
-                      换个邮箱
+                      换个手机号
                     </button>
                     <button
                       type="submit"
@@ -2551,6 +2542,9 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                               <div className="text-[11px] text-slate-500">
                                 手术/治疗：{maskField(pt.surgery, 8)} （日期：{maskField(pt.surgeryDate, 6)}）
                               </div>
+                              <div className="text-[11px] text-slate-500">
+                                手术医生：{maskField(pt.surgeon, 8)}
+                              </div>
                             </div>
 
                             <div className="flex sm:flex-col items-end justify-between shrink-0 gap-1.5">
@@ -2655,7 +2649,9 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">联系电话</label>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          患者手机号 <span className="font-normal text-slate-400">（患者登录用的手机号）</span>
+                        </label>
                         <input
                           type="text"
                           value={newPatientForm.phone}
@@ -2668,7 +2664,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        患者邮箱 <span className="font-normal text-slate-400">（患者扫码后用此邮箱收验证码登录，查看自己的随访）</span>
+                        患者邮箱 <span className="font-normal text-slate-400">（选填，仅存档）</span>
                       </label>
                       <input
                         type="email"
@@ -2697,6 +2693,16 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                           value={newPatientForm.surgery}
                           onChange={(e) => setNewPatientForm({ ...newPatientForm, surgery: e.target.value })}
                           placeholder="如：UBE内镜髓核摘除 / 后路矫形内固定"
+                          className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">手术医生</label>
+                        <input
+                          type="text"
+                          value={newPatientForm.surgeon}
+                          onChange={(e) => setNewPatientForm({ ...newPatientForm, surgeon: e.target.value })}
+                          placeholder="如：张某某 主任医师"
                           className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                         />
                       </div>
@@ -2820,15 +2826,21 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                       </span>
                     </div>
                     <div>
+                      <span className="text-slate-500">手术医生：</span>
+                      <span className="font-medium text-slate-700">
+                        {maskField(selectedPatient.surgeon, 8)}
+                      </span>
+                    </div>
+                    <div>
                       <span className="text-slate-500">联系电话：</span>
                       <span className="font-medium text-slate-700">
                         {maskField(selectedPatient.phone || '未登记', 6)}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-500">登录邮箱：</span>
+                      <span className="text-slate-500">登录手机号：</span>
                       <span className="font-medium text-slate-700">
-                        {selectedPatient.email ? maskField(selectedPatient.email, 6) : '未登记（患者无法自助登录）'}
+                        {selectedPatient.phone ? maskField(selectedPatient.phone, 6) : '未登记（患者无法自助登录）'}
                       </span>
                     </div>
                   </div>
@@ -2850,6 +2862,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                         <option value="术后3个月随访">术后3个月随访</option>
                         <option value="术后6个月随访">术后6个月随访</option>
                         <option value="术后1年随访">术后1年随访</option>
+                        <option value="术后1年半随访">术后1年半随访</option>
                         <option value="术后2年随访">术后2年随访</option>
                       </select>
                     </div>
@@ -4645,6 +4658,7 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
                         <option value="术后3个月随访">术后3个月随访</option>
                         <option value="术后6个月随访">术后6个月随访</option>
                         <option value="术后1年随访">术后1年随访</option>
+                        <option value="术后1年半随访">术后1年半随访</option>
                         <option value="术后2年随访">术后2年随访</option>
                       </select>
                     </div>
@@ -4870,12 +4884,12 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
             </div>
             <img src={qrModal.dataUrl} alt="扫码登录" className="w-64 h-64 mx-auto" />
             <p className="text-xs text-slate-600 leading-relaxed">
-              请【{qrModal.patient?.name}】用手机扫码，在登录页输入建档邮箱
-              <span className="font-bold text-slate-900"> {qrModal.patient?.email || '（未登记邮箱）'} </span>
+              请【{qrModal.patient?.name}】用手机扫码，在登录页输入建档手机号
+              <span className="font-bold text-slate-900"> {qrModal.patient?.phone || '（未登记手机号）'} </span>
               获取验证码登录。
             </p>
-            {!qrModal.patient?.email && (
-              <p className="text-[11px] text-rose-600 font-semibold">该患者档案还没有登记邮箱，扫码后无法看到自己的档案。</p>
+            {!qrModal.patient?.phone && (
+              <p className="text-[11px] text-rose-600 font-semibold">该患者档案还没有登记手机号，扫码后无法看到自己的档案。</p>
             )}
             <p className="text-[11px] text-slate-400 break-all">{qrModal.url}</p>
           </div>
