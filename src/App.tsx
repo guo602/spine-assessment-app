@@ -1611,8 +1611,9 @@ const getBlankAnswers = () => ({
   srs22: {}
 });
 
-export default function SpineFollowUpApp({ role, me, onSignOut }) {
+export default function SpineFollowUpApp({ role, me, onSignOut, qrToken }) {
   const isDoctor = role === 'doctor';
+  const isQr = role === 'qr';
   // 疾病部位分支状态：'lumbar' (我是腰椎疾病患者) | 'cervical' (我是颈椎疾病患者)
   const [spineRegion, setSpineRegion] = useState('lumbar');
 
@@ -1760,6 +1761,28 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
   };
 
   useEffect(() => {
+    if (isQr) {
+      // 扫码患者：用 token 直接读取自己的档案，不走登录态
+      setPatientsLoading(true);
+      setLoadError('');
+      (async () => {
+        try {
+          const loaded = await api.patientByToken(qrToken);
+          if (!loaded) {
+            setLoadError('二维码链接无效或已过期，请联系医生重新获取');
+          } else {
+            setPatients([loaded]);
+            setSelectedPatientId(loaded.id);
+            setSpineRegion(loaded.spineRegion || 'lumbar');
+          }
+        } catch (e) {
+          setLoadError(e.message);
+        } finally {
+          setPatientsLoading(false);
+        }
+      })();
+      return;
+    }
     reloadPatients({ keepSelection: false });
   }, []);
 
@@ -1812,9 +1835,14 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
 
   // 生成扫码登录二维码：扫码打开网站，患者用建档时登记的手机号收验证码登录
   const openPatientQr = async (patient) => {
-    const url = `${window.location.origin}/`;
-    const dataUrl = await QRCode.toDataURL(url, { width: 480, margin: 2 });
-    setQrModal({ open: true, dataUrl, patient, url });
+    try {
+      const token = await api.setPatientToken(patient.id);
+      const url = `${window.location.origin}/?token=${token}`;
+      const dataUrl = await QRCode.toDataURL(url, { width: 480, margin: 2 });
+      setQrModal({ open: true, dataUrl, patient, url });
+    } catch (err) {
+      flashToast(err.message, 5000);
+    }
   };
 
   // 当前选中的患者对象
@@ -2035,7 +2063,13 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
       if (isDoctor && selectedPatient.spineRegion !== spineRegion) {
         await api.updatePatientRegion(selectedPatient.id, spineRegion);
       }
-      const saved = await api.addRecord(selectedPatient.id, newRec, answers, role, me.uid);
+      let saved;
+      if (isQr) {
+        const res = await api.patientSubmit(qrToken, newRec, answers);
+        saved = { ...newRec, recordId: res.recordId, submittedRole: 'patient' };
+      } else {
+        saved = await api.addRecord(selectedPatient.id, newRec, answers, role, me.uid);
+      }
       setPatients((prev) =>
         prev.map((p) => (p.id === selectedPatient.id ? { ...p, spineRegion, records: [...(p.records || []), saved] } : p))
       );
@@ -2325,8 +2359,11 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
               ) : loadError ? (
                 <>
                   <p className="text-rose-600 font-semibold">{loadError}</p>
-                  <button onClick={() => reloadPatients()} className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700">
-                    重新载入
+                  <button
+                    onClick={() => (isQr ? window.location.replace(window.location.origin + '/') : reloadPatients())}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700"
+                  >
+                    {isQr ? '返回登录页' : '重新载入'}
                   </button>
                 </>
               ) : !me.phone ? (
@@ -4884,13 +4921,9 @@ export default function SpineFollowUpApp({ role, me, onSignOut }) {
             </div>
             <img src={qrModal.dataUrl} alt="扫码登录" className="w-64 h-64 mx-auto" />
             <p className="text-xs text-slate-600 leading-relaxed">
-              请【{qrModal.patient?.name}】用手机扫码，在登录页输入建档手机号
-              <span className="font-bold text-slate-900"> {qrModal.patient?.phone || '（未登记手机号）'} </span>
-              获取验证码登录。
+              请【{qrModal.patient?.name}】用手机扫码，直接填写问卷，无需登录。
             </p>
-            {!qrModal.patient?.phone && (
-              <p className="text-[11px] text-rose-600 font-semibold">该患者档案还没有登记手机号，扫码后无法看到自己的档案。</p>
-            )}
+            <p className="text-[11px] text-slate-400">每次重新生成二维码，旧二维码都会失效，请用最新的这一个。</p>
             <p className="text-[11px] text-slate-400 break-all">{qrModal.url}</p>
           </div>
         </div>

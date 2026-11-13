@@ -150,3 +150,47 @@ CREATE POLICY records_update ON public.records FOR UPDATE TO authenticated
   USING (public.is_doctor()) WITH CHECK (public.is_doctor());
 CREATE POLICY records_delete ON public.records FOR DELETE TO authenticated
   USING (public.is_doctor());
+
+-- ---------- 专属二维码（token）访问：患者扫码后无需登录 ----------
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS token text;
+CREATE UNIQUE INDEX IF NOT EXISTS patients_token_key ON public.patients (token) WHERE token IS NOT NULL AND token <> '';
+
+-- 患者用 token 读自己的档案与随访记录（不返回 token 本身）
+CREATE OR REPLACE FUNCTION public.patient_by_token(p_token text)
+RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT jsonb_build_object(
+    'id', p.id, 'name', p.name, 'gender', p.gender, 'age', p.age,
+    'spineRegion', p.spine_region, 'hospitalId', p.hospital_id,
+    'phone', p.phone, 'diagnosis', p.diagnosis, 'surgery', p.surgery,
+    'records', (
+      SELECT coalesce(
+        jsonb_agg(jsonb_build_object('recordId', r.id, 'submittedRole', r.submitted_role) || r.data ORDER BY r.created_at),
+        '[]'::jsonb
+      )
+      FROM public.records r WHERE r.patient_id = p.id
+    )
+  )
+  FROM public.patients p
+  WHERE p.token = p_token AND p.token IS NOT NULL AND p.token <> ''
+$$;
+
+-- 患者用 token 提交一次随访记录
+CREATE OR REPLACE FUNCTION public.patient_submit(p_token text, p_data jsonb, p_answers jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE pid text; rid text;
+BEGIN
+  SELECT id INTO pid FROM public.patients WHERE token = p_token AND token IS NOT NULL AND token <> '';
+  IF pid IS NULL THEN
+    RAISE EXCEPTION '无效的二维码链接，请联系医生重新获取';
+  END IF;
+  INSERT INTO public.records (patient_id, data, answers, submitted_role)
+  VALUES (pid, p_data, p_answers, 'patient')
+  RETURNING id INTO rid;
+  RETURN jsonb_build_object('recordId', rid);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.patient_by_token(text), public.patient_submit(text, jsonb, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.patient_by_token(text), public.patient_submit(text, jsonb, jsonb) TO anon, authenticated;

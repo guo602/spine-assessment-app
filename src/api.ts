@@ -144,3 +144,51 @@ export async function deleteRecord(recordId: string) {
   const { error } = await db().from('records').delete().eq('id', recordId);
   if (error) throw fail('删除随访记录', error);
 }
+
+// ---------- 专属二维码（token）访问：患者扫码后无需登录 ----------
+
+// 患者用 token 读自己的档案与随访记录；token 无效时返回 null
+export async function patientByToken(token: string) {
+  const { data, error } = await db().rpc('patient_by_token', { p_token: token });
+  if (error) throw fail('读取档案', error);
+  if (!data || !data.id) return null;
+  return {
+    id: data.id,
+    name: data.name || '',
+    gender: data.gender || '',
+    age: data.age ?? '',
+    spineRegion: data.spineRegion || 'lumbar',
+    hospitalId: data.hospitalId || '',
+    phone: data.phone || '',
+    email: data.email || '',
+    diagnosis: data.diagnosis || '',
+    surgery: data.surgery || '',
+    surgeon: data.surgeon || '',
+    surgeryDate: data.surgeryDate || '',
+    isDemo: false,
+    selfRegistered: false,
+    records: (data.records || []).map((r: any) => ({ ...r }))
+  };
+}
+
+// 患者用 token 提交一次随访记录，返回 { recordId }
+export async function patientSubmit(token: string, record: any, answers: any) {
+  const { recordId, ...data } = record;
+  const { data: rows, error } = await db().rpc('patient_submit', {
+    p_token: token,
+    p_data: data,
+    p_answers: answers
+  });
+  if (error) throw fail('提交', error);
+  return rows;
+}
+
+// 医生为患者生成/刷新专属二维码 token（每次生成新 token，旧链接随即失效）
+export async function setPatientToken(patientId: string) {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const { error } = await db().from('patients').update({ token }).eq('id', patientId);
+  if (error) throw fail('生成二维码', error);
+  return token;
+}
